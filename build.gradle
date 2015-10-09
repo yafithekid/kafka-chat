@@ -1,5 +1,5 @@
-group 'com.yafithekid'
-version '1.0'
+group 'pat'
+version '1.0-SNAPSHOT'
 
 apply plugin: 'java'
 
@@ -11,4 +11,17 @@ repositories {
 
 dependencies {
     testCompile group: 'junit', name: 'junit', version: '4.11'
+    compile 'org.apache.kafka:kafka_2.10:0.8.2.2'
+    compile 'org.apache.kafka:kafka-clients:0.8.2.0'
+}
+
+task clientJar(type: Jar){
+    manifest {
+        attributes 'Main-Class': 'pat.kafka.chat.KafkaUser'
+    }
+    baseName = project.name + '-client'
+    from {
+        configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    with jar
 }
