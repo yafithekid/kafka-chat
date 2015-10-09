@@ -197,8 +197,8 @@ public class KafkaUser {
     }
 
     public static void main(String[] args) throws Exception {
-        //KafkaUser client = new KafkaUser(args[0], args[1]);
-        KafkaUser client = new KafkaUser("167.205.34.208:2181","167.205.34.208:9092");
+        KafkaUser client = new KafkaUser(args[0], args[1]);
+        //KafkaUser client = new KafkaUser("167.205.34.208:2181","167.205.34.208:9092");
         try {
             boolean stop = false;
             do{
