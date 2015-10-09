@@ -6,6 +6,8 @@ import java.lang.String;
 import java.util.*;
 
 import kafka.consumer.*;
+import kafka.javaapi.consumer.*;
+import kafka.javaapi.consumer.ConsumerConnector;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -15,10 +17,10 @@ import org.apache.kafka.clients.producer.ProducerRecord;
  * One user, one customer group
  * One user, one topic to record the channel they suscribe to
  * One channel, one topic
+ * To diffrentiate between old channel and new channel list in user channelListTopic,
+ * every channel List first started by "  "
  */
 public class KafkaUser {
-    private kafka.javaapi.consumer.ConsumerConnector connector;
-    private org.apache.kafka.clients.producer.KafkaProducer producer;
     private String zookeeper;
     private String nickname;
     private String bootstrapBroker;
@@ -35,7 +37,7 @@ public class KafkaUser {
         }
         this.nickname = nickname;
         ConsumerConfig config = createConsumerConfig(this.zookeeper,getCustomerGroup());
-        connector = Consumer.createJavaConsumerConnector(config);
+        ConsumerConnector connector = Consumer.createJavaConsumerConnector(config);
 
 	    Map<String, Integer> topicCountMap = new HashMap<String, Integer>();
         topicCountMap.put(getUserChannelsTopic(), 1);
@@ -47,7 +49,13 @@ public class KafkaUser {
             ConsumerIterator<byte[], byte[]> it = stream.iterator();
             try {
                 while (it.hasNext()) {
-                    channelList.add(new String(it.next().message()));
+                    String channel = new String(it.next().message());
+                    if (channel.equals("  ")) {
+                        channelList.clear();
+                    }
+                    else {
+                        channelList.add(channel);
+                    }
                 }
             }
             catch (Exception e) {
@@ -58,30 +66,40 @@ public class KafkaUser {
             }
         }
 
-        producer = getProducer();
+        connector.shutdown();
     }
 
     public void join(String channel) {
-        if (channelList.contains(channel)) {
+        if (!channelList.contains(channel)) {
             channelList.add(channel);
+            System.out.println("[OK] Joined "+channel);
+        } else {
+            System.out.println("[ERROR] Already joined "+channel);
         }
+
     }
 
     public void leave(String channel) {
         if (channelList.contains(channel)) {
             channelList.remove(channel);
+            System.out.println("[OK] Leave "+channel);
+        } else {
+            System.out.println("[ERROR] Not joined "+channel);
         }
     }
 
     public void send(String channelName, String message) {
+        KafkaProducer producer = getProducer();
         String modifiedMessage = "[" + nickname + "][" + channelName + "]" + message;
         ProducerRecord<byte[],byte[]> record =
                 new ProducerRecord<byte[],byte[]>(getChannelTopicName(channelName),
                         modifiedMessage.getBytes());
         producer.send(record);
+        producer.close();
     }
 
     public void sendAll (String message) {
+        KafkaProducer producer = getProducer();
         String modifiedMessage = "[broadcast][" + nickname + "]" + message;
         for (String channel : channelList) {
             ProducerRecord<byte[],byte[]> record =
@@ -89,14 +107,17 @@ public class KafkaUser {
                             modifiedMessage.getBytes());
             producer.send(record);
         }
+        producer.close();
     }
 
     public List<String> recieveMessages() {
 	Map<String, Integer> topicCountMap = new HashMap<String, Integer>();
-        for (String channel : channelList) {
-            topicCountMap.put(getChannelTopicName(channel), 1);
-        }
+    for (String channel : channelList) {
+        topicCountMap.put(getChannelTopicName(channel), 1);
+    }
 
+    ConsumerConfig config = createConsumerConfig(this.zookeeper,getCustomerGroup());
+    ConsumerConnector connector = Consumer.createJavaConsumerConnector(config);
 	Map<String, List<KafkaStream<byte[], byte[]>>> consumerMap = connector.createMessageStreams(topicCountMap);
 
 	List<String> messages = new ArrayList<String>();	
@@ -117,21 +138,20 @@ public class KafkaUser {
                 }
             }
         }
+        connector.shutdown();
  
         return messages;
     }
 
     public void exit() {
+        KafkaProducer producer = getProducer();
+        ProducerRecord<byte[],byte[]> record = new ProducerRecord<byte[],byte[]>(getUserChannelsTopic(),"  ".getBytes());
+        producer.send(record);
         for (String channel : channelList) {
-            ProducerRecord<byte[],byte[]> record = new ProducerRecord<byte[],byte[]>(getUserChannelsTopic(),channel.getBytes());
+            record = new ProducerRecord<byte[],byte[]>(getUserChannelsTopic(),channel.getBytes());
             producer.send(record);
         }
-	if (this.connector != null) {
-        	this.connector.shutdown();
-	}
-        if (this.producer != null) {
-		this.producer.close();
-	}
+        producer.close();
         this.nickname = null;
         this.channelList = new ArrayList<String>();
     }
@@ -140,6 +160,7 @@ public class KafkaUser {
         java.util.Map<java.lang.String,java.lang.Object> configs = new HashMap<String, Object>();
 	    configs.put("bootstrap.servers",bootstrapBroker);
         configs.put("key.serializer", "org.apache.kafka.common.serialization.ByteArraySerializer");
+        configs.put("value.serializer","org.apache.kafka.common.serialization.ByteArraySerializer");
         return new KafkaProducer(configs);
     }
 
@@ -170,12 +191,14 @@ public class KafkaUser {
         props.put("zookeeper.session.timeout.ms", "400");
         props.put("zookeeper.sync.time.ms", "200");
         props.put("auto.commit.interval.ms", "1000");
-        props.put("consumer.timeout.ms","500");
+        props.put("consumer.timeout.ms","2000");
+        props.put("auto.offset.reset","smallest");
         return new ConsumerConfig(props);
     }
 
     public static void main(String[] args) throws Exception {
-        KafkaUser client = new KafkaUser(args[0], args[1]);
+        //KafkaUser client = new KafkaUser(args[0], args[1]);
+        KafkaUser client = new KafkaUser("167.205.34.208:2181","167.205.34.208:9092");
         try {
             boolean stop = false;
             do{
